@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MCW Drawing Tool 6</title>
+<title>MCW Issue Sheets Creator</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,sans-serif;background:#f5f5f5;color:#222;min-height:100vh}
@@ -17,7 +17,7 @@ main{max-width:900px;margin:40px auto;padding:0 24px}
 #dropzone .icon{font-size:48px;margin-bottom:12px}
 #dropzone h2{color:#1F3864;font-size:18px;margin-bottom:8px}
 #dropzone p{color:#666;font-size:14px}
-#fileInput{display:none}
+#fileInput{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px}
 .step-header{display:flex;align-items:center;gap:10px;margin-bottom:16px;font-size:16px;font-weight:700;color:#1F3864}
 .step-badge{background:#1F3864;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
 table{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}
@@ -40,12 +40,22 @@ tr:last-child td{border-bottom:none}
 .btn:disabled{opacity:.4;cursor:default}
 [hidden]{display:none!important}
 #registerProgress{margin-top:12px}
+.distribution-label{display:block;font-weight:700;color:#1F3864;margin:16px 0 8px}
+.distribution-zone{border:2px dashed #cfd8e3;border-radius:8px;padding:12px;background:#fafcfe;transition:border-color .2s,background .2s}
+.distribution-zone.drag-over{border-color:#1F3864;background:#eef3fb}
+.distribution-placeholder{font-size:13px;color:#6c757d}
+.distribution-hint{font-size:13px;color:#666;margin-top:8px}
+.recipient-list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.recipient-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #dfe6ee;border-radius:6px;background:#fff}
+.recipient-row input[type="text"]{flex:1;border:1px solid #cfd8e3;border-radius:4px;padding:7px 8px;font-size:14px}
+.recipient-row label{font-size:13px;color:#1F3864;display:flex;align-items:center;gap:4px}
+.recipient-row .remove-btn{border:none;background:#e53935;color:#fff;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:12px}
+.add-recipient-btn{margin-top:8px;padding:8px 12px;border:none;border-radius:6px;background:#1F3864;color:#fff;cursor:pointer;font-size:13px;font-weight:700}
 </style>
 </head>
 <body>
 <header>
-  <img id="headerLogo" alt="MCW">
-  <h1>MCW Drawing Tool</h1>
+  <h1>MCW Issue Sheets Creator</h1>
 </header>
 <main>
   <div class="card">
@@ -54,7 +64,19 @@ tr:last-child td{border-bottom:none}
       <h2>Drop PDF drawings here</h2>
       <p>or <strong>click to select files</strong> — select all PDFs in your drawing folder</p>
     </div>
-    <input type="file" id="fileInput" multiple accept=".pdf">
+    <input type="file" id="fileInput" multiple accept=".pdf" webkitdirectory directory>
+
+    <label class="distribution-label">Distribution recipients</label>
+    <div id="distributionZone" class="distribution-zone" tabindex="0">
+      <div class="distribution-placeholder">Drop a name into any recipient box below</div>
+    </div>
+    <div id="recipientList" class="recipient-list"></div>
+    <div style="display:flex;gap:12px;margin-top:10px;margin-bottom:8px">
+      <label style="font-size:13px;color:#1F3864;display:flex;align-items:center;gap:4px"><input type="checkbox" id="sharedCDE"> CDE</label>
+      <label style="font-size:13px;color:#1F3864;display:flex;align-items:center;gap:4px"><input type="checkbox" id="sharedEL"> EL</label>
+    </div>
+    <button type="button" class="add-recipient-btn" id="addRecipientBtn">+ Add recipient</button>
+    <button type="button" class="add-recipient-btn" id="createExcelBtn" disabled style="margin-top:12px">Create Excel Spreadsheet</button>
   </div>
 
   <div class="card" id="step1Card" hidden>
@@ -67,14 +89,14 @@ tr:last-child td{border-bottom:none}
   </div>
 
   <div class="card" id="step2Card" hidden>
-    <div class="step-header"><div class="step-badge">2</div>Building drawing register</div>
+    <div class="step-header"><div class="step-badge">2</div>Building Issue Sheet</div>
     <div id="registerProgress"></div>
   </div>
 
   <div class="card" id="resultsCard" hidden>
     <div class="step-header" style="margin-bottom:20px">✅ Done — download your files</div>
     <div class="btns">
-      <button class="btn btn-primary" id="btnXlsx">⬇ Drawing_Register.xlsx</button>
+      <button class="btn btn-primary" id="btnXlsx">⬇ <span id="xlsxFilename">Drawing_Register.xlsx</span></button>
       <button class="btn btn-secondary" id="btnErrors" hidden>⬇ Filename_Errors.txt</button>
     </div>
   </div>
@@ -88,7 +110,10 @@ const LOGO_B64 = 'iVBORw0KGgoAAAANSUhEUgAAALYAAACUCAYAAAA+lNM5AAAAAXNSR0IArs4c6Q
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-document.getElementById('headerLogo').src = 'data:image/png;base64,' + LOGO_B64;
+const headerLogo = document.getElementById('headerLogo');
+if (headerLogo) {
+  headerLogo.src = 'data:image/png;base64,' + LOGO_B64;
+}
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -113,7 +138,7 @@ const REGISTER_FIELDS = [
   // maxLines = max value lines to collect
   // gap     = max y-gap (pt) between consecutive value lines before stopping
   {key:'drawing_title', label:'Drawing Title', multiline:true,  leftM:20, rightM:200, maxLines:2, gap:15, rightSearch:false},
-  {key:'drawing_no',    label:'Drawing No.',   multiline:false, leftM:15, rightM:400, maxLines:1, gap:30, rightSearch:true},
+  {key:'drawing_no',    label:'Drawing No.',   multiline:false, leftM:15, rightM:300, maxLines:1, gap:30, rightSearch:true},
   {key:'rev',           label:'Rev',           multiline:false, leftM:15, rightM:50,  maxLines:1, gap:30, rightSearch:true},
   {key:'project_title', label:'Project Title', multiline:false, leftM:20, rightM:350, maxLines:1, gap:30, rightSearch:true},
 ];
@@ -426,9 +451,108 @@ function shortProject(name) {
 
 // ── Excel building ────────────────────────────────────────────────────────────
 
-async function buildExcel(grouped, projectName, jobNo) {
+function getDistributionRecipients() {
+  const rows = Array.from(document.querySelectorAll('#recipientList .recipient-row'));
+  const cde = document.getElementById('sharedCDE').checked;
+  const el = document.getElementById('sharedEL').checked;
+  return rows.map(row => {
+    const name = row.querySelector('input[type="text"]').value.trim();
+    return {name, cde, el};
+  }).filter(item => item.name);
+}
+
+function insertDistributionText(text, targetInput=null) {
+  let input_text = (text || '').replace(/\r/g, '').trim();
+  if (!input_text) return;
+
+  if (targetInput) {
+    // Single input target: extract first quoted name or use as-is
+    let name = input_text;
+    const quotedMatch = input_text.match(/^"([^"]+)"/);
+    if (quotedMatch) {
+      name = quotedMatch[1];
+    } else {
+      const emailMatch = input_text.match(/([a-zA-Z0-9._%-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+      if (emailMatch) {
+        name = emailMatch[0];
+      }
+    }
+    targetInput.value = name;
+    targetInput.focus();
+    targetInput.dispatchEvent(new Event('input', {bubbles:true}));
+    return;
+  }
+
+  // Extract all quoted names from the text
+  const allQuotedMatches = input_text.match(/"([^"]+)"/g);
+  const names = [];
+  if (allQuotedMatches && allQuotedMatches.length > 0) {
+    // Extract content from each quoted string
+    allQuotedMatches.forEach(match => {
+      const name = match.replace(/"/g, '').trim();
+      if (name) names.push(name);
+    });
+  } else {
+    // No quotes found, try to extract single email or use as-is
+    const emailMatch = input_text.match(/([a-zA-Z0-9._%-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+    if (emailMatch) {
+      names.push(emailMatch[0]);
+    } else {
+      names.push(input_text);
+    }
+  }
+
+  if (!names.length) return;
+
+  const current = getDistributionRecipients();
+
+  // Add all new names to the current list
+  names.forEach(name => {
+    current.push({name});
+  });
+
+  // Render all recipients at once
+  renderRecipientRows(current);
+
+  // Focus on the last added row
+  const lastRow = recipientList.lastElementChild;
+  if (lastRow) {
+    const input = lastRow.querySelector('input[type="text"]');
+    input.focus();
+  }
+}
+
+function renderRecipientRows(recipients=[]) {
+  const list = document.getElementById('recipientList');
+  if (!list) return;
+  list.innerHTML = '';
+  const items = recipients.length ? recipients : [{name:''}];
+  items.forEach((item, index) => {
+    const row = document.createElement('div');
+    row.className = 'recipient-row';
+    row.innerHTML = `
+      <input type="text" value="${(item.name || '').replace(/"/g,'&quot;')}" placeholder="Name" />
+      <button type="button" class="remove-btn">Remove</button>
+    `;
+    const nameInput = row.querySelector('input[type="text"]');
+    nameInput.addEventListener('dragover', e => e.preventDefault());
+    nameInput.addEventListener('drop', e => {
+      e.preventDefault();
+      const text = e.dataTransfer.getData('text/plain') || '';
+      insertDistributionText(text, nameInput);
+    });
+    row.querySelector('.remove-btn').addEventListener('click', () => {
+      const current = getDistributionRecipients();
+      current.splice(index, 1);
+      renderRecipientRows(current);
+    });
+    list.appendChild(row);
+  });
+}
+
+async function buildExcel(grouped, projectName, jobNo, recipients=[]) {
   const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet('Drawing Register');
+  const ws = wb.addWorksheet('Issue Sheet');
 
   // Logo
   const imgId = wb.addImage({base64: LOGO_B64, extension:'png'});
@@ -440,11 +564,10 @@ async function buildExcel(grouped, projectName, jobNo) {
   addrCell.value = 'MCW Architects\nStudio 2\nStapleford Granary\nBury Road, Stapleford\nCambridge CB22 5BP\n\n+44 1223 792 500\nmcwarchitects.com';
   addrCell.font = {name:'Arial',size:10};
   addrCell.alignment = {horizontal:'left',vertical:'top',wrapText:true};
-  ws.mergeCells('B2:D2');
 
   // Title
   const tc = ws.getCell('A6');
-  tc.value = 'WS3 Drawing Issue and Record Sheet';
+  tc.value = 'Drawing Issue and Record Sheet';
   tc.font = {name:'Arial',size:14,bold:true};
 
   // Box border helper
@@ -453,13 +576,11 @@ async function buildExcel(grouped, projectName, jobNo) {
 
   // Project / Job No
   ws.getCell('A8').value = 'Project:';  ws.getCell('A8').font = {name:'Arial',size:10,bold:true};
-  ws.getCell('C8').value = projectName; ws.getCell('C8').font = {name:'Arial',size:10};
-  ws.mergeCells('C8:D8');
+  ws.getCell('B8').value = projectName; ws.getCell('B8').font = {name:'Arial',size:10};
   ws.getCell('A9').value = 'Job No.:'; ws.getCell('A9').font = {name:'Arial',size:10,bold:true};
-  ws.getCell('C9').value = jobNo;       ws.getCell('C9').font = {name:'Arial',size:10};
-  ws.mergeCells('C9:D9');
-  applyBorder(8,[1,2,3,4,5],bb);
-  applyBorder(9,[1,2,3,4,5],bb);
+  ws.getCell('B9').value = jobNo;       ws.getCell('B9').font = {name:'Arial',size:10};
+  applyBorder(8,[1,2],bb);
+  applyBorder(9,[1,2],bb);
 
   // Date
   const today = new Date();
@@ -468,34 +589,51 @@ async function buildExcel(grouped, projectName, jobNo) {
   const yy = String(today.getFullYear()).slice(-2);
   for (const [i,[lbl,val]] of [['day',dd],['month',mm],['year',yy]].entries()) {
     const r = 11+i;
-    ws.getCell(r,4).value=lbl; ws.getCell(r,4).alignment={horizontal:'right'}; ws.getCell(r,4).font={name:'Arial',size:10};
-    ws.getCell(r,5).value=val; ws.getCell(r,5).alignment={horizontal:'center'}; ws.getCell(r,5).font={name:'Arial',size:10};
+    ws.getCell(r,2).value=lbl; ws.getCell(r,2).alignment={horizontal:'right'}; ws.getCell(r,2).font={name:'Arial',size:10};
+    ws.getCell(r,3).value=val; ws.getCell(r,3).alignment={horizontal:'center'}; ws.getCell(r,3).font={name:'Arial',size:10};
   }
 
   // Distribution
+  const visibleRecipients = (recipients || []).filter(item => item && item.name);
+  const distributionRows = visibleRecipients.length;
+  const distributionStartRow = 14;
+  const headerRow = 13 + 3 + distributionRows;
+
   ws.getCell('A13').value = 'DISTRIBUTION';
   ws.getCell('A13').font = {name:'Arial',size:10,bold:true};
-  for (let r=14;r<=18;r++) {
-    ws.mergeCells(`A${r}:C${r}`);
-    applyBorder(r,[1,2,3],bb);
+  visibleRecipients.slice(0, distributionRows).forEach((item, idx) => {
+    const r = distributionStartRow + idx;
+    const nameCell = ws.getCell(r,1);
+    nameCell.value = item.name;
+    nameCell.font = {name:'Arial',size:10};
+    nameCell.alignment = {vertical:'top',wrapText:true};
+    const typeCell = ws.getCell(r,2);
+    const types = [];
+    if (item.cde) types.push('CDE');
+    if (item.el) types.push('EL');
+    typeCell.value = types.join(' + ');
+    typeCell.font = {name:'Arial',size:10};
+    typeCell.alignment = {vertical:'top',wrapText:true};
+  });
+
+  for (let r=14; r<headerRow-2; r++) {
+    for (let c=1; c<=2; c++) ws.getCell(r,c).border = bb;
   }
 
   // Column widths
   ws.getColumn(1).width = 55;
   ws.getColumn(2).width = 26;
-  ws.getColumn(5).width = 12;
+  ws.getColumn(3).width = 12;
 
-  // Table headers (row 20)
-  const T = 20;
-  ws.getCell(T,1).value='DRAWING TITLE'; ws.getCell(T,1).font={name:'Arial',bold:true};
-  ws.getCell(T,2).value='Dwg No.';       ws.getCell(T,2).font={name:'Arial',bold:true};
-  ws.getCell(T,5).value='Revisions';     ws.getCell(T,5).font={name:'Arial',bold:true};
-  ws.mergeCells(T,2,T,4);
+  // Table headers
+  ws.getCell(headerRow,1).value='DRAWING TITLE'; ws.getCell(headerRow,1).font={name:'Arial',bold:true};
+  ws.getCell(headerRow,2).value='Dwg No.';       ws.getCell(headerRow,2).font={name:'Arial',bold:true};
+  ws.getCell(headerRow,3).value='Revisions';     ws.getCell(headerRow,3).font={name:'Arial',bold:true};
 
-  // Navy project bar (row 21)
-  const pbr = T+1;
+  // Navy project bar
+  const pbr = headerRow + 1;
   ws.getCell(pbr,1).value = shortProject(projectName);
-  ws.mergeCells(pbr,1,pbr,5);
+  ws.mergeCells(pbr,1,pbr,3);
   const pbc = ws.getCell(pbr,1);
   pbc.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF1F3864'}};
   pbc.font={name:'Arial',bold:true,color:{argb:'FFFFFFFF'}};
@@ -510,7 +648,7 @@ async function buildExcel(grouped, projectName, jobNo) {
   let ri = pbr+1;
   for (const [catLabel, rows] of grouped) {
     ws.getCell(ri,1).value = catLabel;
-    ws.mergeCells(ri,1,ri,5);
+    ws.mergeCells(ri,1,ri,3);
     const cc = ws.getCell(ri,1);
     cc.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF808080'}};
     cc.font={name:'Arial',color:{argb:'FFFFFFFF'}};
@@ -520,17 +658,16 @@ async function buildExcel(grouped, projectName, jobNo) {
     for (const [title,dwgNo,rev] of rows) {
       ws.getCell(ri,1).value=title;  ws.getCell(ri,1).font={name:'Arial'};
       ws.getCell(ri,2).value=dwgNo;  ws.getCell(ri,2).font={name:'Arial'};
-      ws.getCell(ri,5).value=rev;    ws.getCell(ri,5).font={name:'Arial'};
-      ws.getCell(ri,5).alignment={horizontal:'center'};
-      ws.mergeCells(ri,2,ri,4);
-      for(let c=1;c<=5;c++) ws.getCell(ri,c).border=tgb;
+      ws.getCell(ri,3).value=rev;    ws.getCell(ri,3).font={name:'Arial'};
+      ws.getCell(ri,3).alignment={horizontal:'center'};
+      for(let c=1;c<=3;c++) ws.getCell(ri,c).border=tgb;
       ri++;
     }
   }
 
-  // Blue accent on column 5 (skip merged special rows)
+  // Blue accent on column 3 (skip merged special rows)
   const blue = {type:'pattern',pattern:'solid',fgColor:{argb:'FFDCEEFB'}};
-  for (let r=1;r<ri;r++) { if(!specialRows.has(r)) ws.getCell(r,5).fill=blue; }
+  for (let r=1;r<ri;r++) { if(!specialRows.has(r)) ws.getCell(r,3).fill=blue; }
 
   // No freeze panes — sheet scrolls freely
   ws.pageSetup={orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0};
@@ -553,6 +690,17 @@ function buildErrorText(errorEntries) {
     lines.push('');
   }
   return lines.join('\n');
+}
+
+function refreshStep1Summary(errorEntries) {
+  const s1 = document.getElementById('step1Summary');
+  _errorText = buildErrorText(errorEntries);
+  if (!errorEntries.length) {
+    s1.innerHTML = '<div class="summary ok">✓ All filenames are correct</div>';
+  } else {
+    s1.innerHTML = '<div class="summary err">✗ ' + errorEntries.length + ' filename problem(s) found — download the error document below</div>';
+  }
+  document.getElementById('btnErrors').hidden = !_errorText;
 }
 
 // ── Download helper ───────────────────────────────────────────────────────────
@@ -580,13 +728,25 @@ function setProgress(msg, done=false) {
 }
 
 let _xlsxBlob=null, _errorText=null;
+let _currentJobNo='NOT FOUND', _currentDate='';
+
+function getFormattedFilename() {
+  const jobno = _currentJobNo;
+  const date = _currentDate || new Date().toISOString().split('T')[0].replace(/-/g,'');
+  return `${jobno}-MCW-ZZ-XX-IS-0001_${date}.xlsx`;
+}
 
 function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
 // ── Main processing ───────────────────────────────────────────────────────────
 
+let _pendingFiles = [];
+let _pendingEntries = null;
+
 async function processFiles(files) {
   if (!files.length) return;
+
+  _pendingFiles = files;
 
   // Reset UI
   document.getElementById('step1Card').hidden = false;
@@ -627,24 +787,34 @@ async function processFiles(files) {
     await sleep(0); // let browser repaint
   }
 
-  // Step 1 summary — shown AFTER job-number check so count is final
-  const s1 = document.getElementById('step1Summary');
-  if (!errorEntries.length) {
-    s1.innerHTML = '<div class="summary ok">✓ All filenames are correct</div>';
-  } else {
-    // Build / rebuild error text here so job-prefix errors are included
-    _errorText = buildErrorText(errorEntries);
-    s1.innerHTML = '<div class="summary err">✗ ' + errorEntries.length + ' filename problem(s) found — download the error document below</div>';
-  }
+  _pendingEntries = {allEntries, errorEntries};
+  refreshStep1Summary(errorEntries);
 
-  // ── Step 2 ──
   document.getElementById('step2Card').hidden = false;
-  setProgress('Grouping drawings by category…');
+  setProgress('Filename check complete — ready to create the spreadsheet.');
   await sleep(10);
 
+  document.getElementById('resultsCard').hidden = false;
+  document.getElementById('btnErrors').hidden = !_errorText;
+  document.getElementById('createExcelBtn').disabled = false;
+}
+
+async function createExcelFromPending() {
+  if (!_pendingFiles.length || !_pendingEntries) return;
+
+  const recipients = getDistributionRecipients();
+  if (!recipients.length) {
+    alert('Please add at least one distribution recipient name before creating the spreadsheet.');
+    return;
+  }
+
+  const {allEntries, errorEntries} = _pendingEntries;
   const projectTitles = allEntries.map(e=>e.fields.project_title).filter(Boolean);
   const projectName = mostCommon(projectTitles) || 'NOT FOUND';
   const jobNo = getJobNo(allEntries.map(e=>e.file.name));
+  _currentJobNo = jobNo;
+  const today = new Date();
+  _currentDate = String(today.getFullYear()).slice(-2) + String(today.getMonth()+1).padStart(2,'0') + String(today.getDate()).padStart(2,'0');
 
   // ── Job number prefix check ──
   // Flag any file whose first 4 characters don't match the project prefix.
@@ -654,7 +824,7 @@ async function processFiles(files) {
       const fname = allEntries[i].file.name;
       const prefix = fname.slice(0,4);
       if (prefix !== jobNo) {
-        const msg = "Job number prefix '" + prefix + "' does not match project prefix '" + jobNo + "'";
+        const msg = "Leading 4-digit project code '" + prefix + "' does not match the shared prefix in the batch '" + jobNo + "'";
         const existing = errorEntries.find(e => e.name === fname);
         if (existing) {
           existing.reasons.push(msg);
@@ -669,28 +839,41 @@ async function processFiles(files) {
     }
   }
 
+  // Step 1 summary — shown AFTER job-number check so count is final
+  refreshStep1Summary(errorEntries);
+
   const grouped = groupByCategory(allEntries);
 
   setProgress('Building Excel spreadsheet…');
   await sleep(10);
 
-  const wb = await buildExcel(grouped, projectName, jobNo);
+  const wb = await buildExcel(grouped, projectName, jobNo, recipients);
   const buf = await wb.xlsx.writeBuffer();
   _xlsxBlob = new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
 
   setProgress(`Done — ${allEntries.length} drawing(s) across ${grouped.length} category group(s)`, true);
 
-  // ── Results ──
   document.getElementById('resultsCard').hidden = false;
   document.getElementById('btnErrors').hidden = !_errorText;
+  document.getElementById('xlsxFilename').textContent = getFormattedFilename();
+  document.getElementById('createExcelBtn').disabled = false;
 }
 
 // ── Event wiring ──────────────────────────────────────────────────────────────
 
 const dropzone  = document.getElementById('dropzone');
 const fileInput = document.getElementById('fileInput');
+const distributionZone = document.getElementById('distributionZone');
+const recipientList = document.getElementById('recipientList');
+const addRecipientBtn = document.getElementById('addRecipientBtn');
 
-dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('click', () => {
+  if (typeof fileInput.showPicker === 'function') {
+    fileInput.showPicker().catch(() => fileInput.click());
+  } else {
+    fileInput.click();
+  }
+});
 dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag-over'); });
 dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
 dropzone.addEventListener('drop', e => {
@@ -704,8 +887,61 @@ fileInput.addEventListener('change', e => {
   fileInput.value='';
 });
 
+distributionZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+  distributionZone.classList.add('drag-over');
+});
+distributionZone.addEventListener('dragleave', () => distributionZone.classList.remove('drag-over'));
+distributionZone.addEventListener('drop', e => {
+  e.preventDefault();
+  e.stopPropagation();
+  distributionZone.classList.remove('drag-over');
+
+  // Try multiple data formats to capture email addresses
+  let text = e.dataTransfer.getData('text/plain');
+  if (!text) text = e.dataTransfer.getData('text/uri-list');
+  if (!text) {
+    const html = e.dataTransfer.getData('text/html');
+    if (html) {
+      // Extract quoted display name or email from HTML
+      let quotedMatch = html.match(/&quot;([^&]+)&quot;/);
+      if (quotedMatch) {
+        text = '"' + quotedMatch[1] + '"';
+      } else {
+        quotedMatch = html.match(/"([^"]+)"/);
+        if (quotedMatch) {
+          text = quotedMatch[0];
+        } else {
+          const emailMatch = html.match(/([a-zA-Z0-9._%-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g);
+          if (emailMatch) text = emailMatch[0];
+        }
+      }
+    }
+  }
+
+  if (text) insertDistributionText(text);
+});
+
+distributionZone.addEventListener('paste', e => {
+  e.preventDefault();
+  const text = (e.clipboardData || window.clipboardData).getData('text/plain');
+  if (text) insertDistributionText(text);
+});
+
+addRecipientBtn.addEventListener('click', () => {
+  const current = getDistributionRecipients();
+  current.push({name:''});
+  renderRecipientRows(current);
+});
+
+renderRecipientRows();
+
 document.getElementById('btnXlsx').addEventListener('click', () => {
-  if (_xlsxBlob) downloadBlob(_xlsxBlob, 'Drawing_Register.xlsx');
+  if (_xlsxBlob) downloadBlob(_xlsxBlob, getFormattedFilename());
+});
+document.getElementById('createExcelBtn').addEventListener('click', () => {
+  createExcelFromPending();
 });
 document.getElementById('btnErrors').addEventListener('click', () => {
   if (_errorText) downloadBlob(new Blob([_errorText],{type:'text/plain'}), 'Filename_Errors.txt');
