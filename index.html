@@ -55,6 +55,7 @@ tr:last-child td{border-bottom:none}
 </head>
 <body>
 <header>
+  <img id="headerLogo" alt="MCW">
   <h1>MCW Issue Sheets Creator</h1>
 </header>
 <main>
@@ -139,7 +140,7 @@ const REGISTER_FIELDS = [
   // gap     = max y-gap (pt) between consecutive value lines before stopping
   {key:'drawing_title', label:'Drawing Title', multiline:true,  leftM:20, rightM:200, maxLines:2, gap:15, rightSearch:false},
   {key:'drawing_no',    label:'Drawing No.',   multiline:false, leftM:15, rightM:300, maxLines:1, gap:30, rightSearch:true},
-  {key:'rev',           label:'Rev',           multiline:false, leftM:15, rightM:50,  maxLines:1, gap:30, rightSearch:true},
+  {key:'rev',           label:'Rev',           multiline:false, leftM:10, rightM:40,  maxLines:1, gap:30, rightSearch:false}, // Strict vertical check
   {key:'project_title', label:'Project Title', multiline:false, leftM:20, rightM:350, maxLines:1, gap:30, rightSearch:true},
 ];
 const ALL_REG_LABELS = new Set(REGISTER_FIELDS.map(f => f.label));
@@ -173,15 +174,41 @@ function isAnyCheckLabel(t) { return checkIsLabel(t, ALL_CHECK_ALIASES); }
 async function extractWords(arrayBuffer) {
   const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
   const raw = [];
+  
   for (let p = 1; p <= pdf.numPages; p++) {
     const page = await pdf.getPage(p);
     const tc = await page.getTextContent();
+    const rotate = page.rotate || 0; // Capture the PDF's visual rotation state
+
     for (const item of tc.items) {
       const s = (item.str || '').trim();
       if (!s) continue;
-      const x0 = item.transform[4];
-      const y  = item.transform[5];
-      const x1 = x0 + Math.abs(item.width || 0);
+      
+      const rx = item.transform[4];
+      const ry = item.transform[5];
+      const rw = Math.abs(item.width || item.transform[0] || 0);
+      
+      let x0, y, x1;
+      
+      // Normalize coordinates to standard visual space regardless of portrait/landscape tagging
+      if (rotate === 90) {
+        x0 = ry;
+        y = -rx;
+        x1 = x0 + Math.abs(item.transform[3] || rw);
+      } else if (rotate === 180) {
+        x0 = -rx;
+        y = -ry;
+        x1 = x0 + rw;
+      } else if (rotate === 270) {
+        x0 = -ry;
+        y = rx;
+        x1 = x0 + Math.abs(item.transform[3] || rw);
+      } else {
+        x0 = rx;
+        y = ry;
+        x1 = x0 + rw;
+      }
+
       raw.push({text: s, x0, y, x1});
     }
   }
@@ -222,6 +249,7 @@ async function extractWords(arrayBuffer) {
 // ── Field extraction — register (exact, case-sensitive) ──────────────────────
 
 function normalizeDwgNo(val) {
+  // "0536 - MCW - ZZ - 00 - DR - A - 0200" → "0536-MCW-ZZ-00-DR-A-0200"
   return val.replace(/\s*-\s*/g, '-').replace(/\s+/g, ' ').trim();
 }
 
@@ -326,17 +354,26 @@ function extractCheckerFields(words) {
         const x1 = Math.max(...sw.map(w => w.x1));
         const ly = Math.min(...sw.map(w => w.y));
 
-        // Drawing No. can span many cells horizontally — use very wide range;
-        // Status/Rev are narrow columns so keep tight range to avoid neighbours.
-        const xRange = field.key === 'drawing_no' ? 600 : 40;
+        // Enforce strict vertical column checking for status/revision
+        const isStrictVertical = (field.key === 'status' || field.key === 'revision');
+        const leftBound  = isStrictVertical ? x0 - 10 : x0 - 600;
+        const rightBound = isStrictVertical ? x1 + 10 : x1 + 600;
+
         const cands = words
-          .filter(w => w.y < ly - 2 && w.x0 < x1 + xRange && w.x1 > x0 - xRange && w.text.trim())
+          .filter(w => 
+            w.y < ly - 2 && 
+            w.y > ly - 50 && // Limit search depth to avoid distant text
+            w.x0 < rightBound && 
+            w.x1 > leftBound && 
+            w.text.trim()
+          )
           .sort((a,b) => b.y - a.y);
 
         if (!cands.length) break;
         const nearY = cands[0].y;
         const sameLine = cands.filter(w => Math.abs(w.y - nearY) <= 5).sort((a,b) => a.x0 - b.x0);
         let val = norm(sameLine.map(w => w.text).join(' '));
+        // Normalise Drawing No.: "0536 - MCW - ZZ - 00" → "0536-MCW-ZZ-00"
         if (field.key === 'drawing_no') val = val.replace(/\s*-\s*/g, '-');
         if (val && !isAnyCheckLabel(val)) found[field.key] = val;
         break;
