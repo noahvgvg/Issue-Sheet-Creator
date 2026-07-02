@@ -222,7 +222,6 @@ async function extractWords(arrayBuffer) {
 // ── Field extraction — register (exact, case-sensitive) ──────────────────────
 
 function normalizeDwgNo(val) {
-  // "0536 - MCW - ZZ - 00 - DR - A - 0200" → "0536-MCW-ZZ-00-DR-A-0200"
   return val.replace(/\s*-\s*/g, '-').replace(/\s+/g, ' ').trim();
 }
 
@@ -338,7 +337,6 @@ function extractCheckerFields(words) {
         const nearY = cands[0].y;
         const sameLine = cands.filter(w => Math.abs(w.y - nearY) <= 5).sort((a,b) => a.x0 - b.x0);
         let val = norm(sameLine.map(w => w.text).join(' '));
-        // Normalise Drawing No.: "0536 - MCW - ZZ - 00" → "0536-MCW-ZZ-00"
         if (field.key === 'drawing_no') val = val.replace(/\s*-\s*/g, '-');
         if (val && !isAnyCheckLabel(val)) found[field.key] = val;
         break;
