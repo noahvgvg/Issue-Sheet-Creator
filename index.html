@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MCW Drawing Tool 3</title>
+<title>MCW Drawing Tool</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,sans-serif;background:#f5f5f5;color:#222;min-height:100vh}
@@ -532,7 +532,7 @@ async function buildExcel(grouped, projectName, jobNo) {
   const blue = {type:'pattern',pattern:'solid',fgColor:{argb:'FFDCEEFB'}};
   for (let r=1;r<ri;r++) { if(!specialRows.has(r)) ws.getCell(r,5).fill=blue; }
 
-  ws.views=[{state:'frozen',xSplit:0,ySplit:T}];
+  // No freeze panes — sheet scrolls freely
   ws.pageSetup={orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0};
   return wb;
 }
@@ -605,9 +605,17 @@ async function processFiles(files) {
     try {
       const buf = await file.arrayBuffer();
       const words = await extractWords(buf);
-      const cf = extractCheckerFields(words);
+      const cf = extractCheckerFields(words);  // still used for Status
       const rf = extractRegisterFields(words);
-      const {ok, reasons} = checkOneFile(file.name, cf);
+      // Use register extraction for Drawing No. and Rev — same logic, same normalisation
+      // as the spreadsheet builder, so the checker is consistent with what ends up in Excel.
+      // Status is checker-only (not in the register) so keep cf.status.
+      const checkFields = {
+        drawing_no: rf.drawing_no || cf.drawing_no,
+        status:     cf.status,
+        revision:   rf.rev       || cf.revision,
+      };
+      const {ok, reasons} = checkOneFile(file.name, checkFields);
       if (!ok) errorEntries.push({name:file.name, reasons});
       allEntries.push({file, fields:rf});
       addCheckRow(file.name, ok);
