@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCW Drawing Tool</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,sans-serif;background:#f5f5f5;color:#222;min-height:100vh}
+header{background:#1F3864;color:#fff;padding:16px 32px;display:flex;align-items:center;gap:20px}
+header img{height:48px;filter:brightness(0) invert(1);opacity:.9}
+header h1{font-size:20px;font-weight:700;letter-spacing:.5px}
+main{max-width:900px;margin:40px auto;padding:0 24px}
+.card{background:#fff;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.10);padding:32px;margin-bottom:24px}
+#dropzone{border:3px dashed #1F3864;border-radius:8px;padding:60px 32px;text-align:center;cursor:pointer;transition:background .2s;user-select:none}
+#dropzone:hover,#dropzone.drag-over{background:#eef3fb}
+#dropzone .icon{font-size:48px;margin-bottom:12px}
+#dropzone h2{color:#1F3864;font-size:18px;margin-bottom:8px}
+#dropzone p{color:#666;font-size:14px}
+#fileInput{display:none}
+.step-header{display:flex;align-items:center;gap:10px;margin-bottom:16px;font-size:16px;font-weight:700;color:#1F3864}
+.step-badge{background:#1F3864;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+table{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}
+th{background:#1F3864;color:#fff;padding:10px 14px;text-align:left;font-weight:600}
+td{padding:9px 14px;border-bottom:1px solid #eee}
+tr:last-child td{border-bottom:none}
+.tick{color:#2e7d32;font-weight:700;font-size:16px}
+.cross{color:#c62828;font-weight:700;font-size:16px}
+.summary{padding:12px 16px;border-radius:6px;font-size:14px;margin-top:16px}
+.summary.ok{background:#e8f5e9;color:#2e7d32;border-left:4px solid #2e7d32}
+.summary.err{background:#ffebee;color:#c62828;border-left:4px solid #c62828}
+.progress-line{font-size:13px;color:#555;margin:6px 0;padding:6px 10px;background:#f0f0f0;border-radius:4px}
+.progress-line.done{color:#2e7d32}
+.progress-line.active{color:#1F3864;font-weight:700}
+.btns{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px}
+.btn{padding:13px 26px;border:none;border-radius:6px;font-size:15px;font-weight:700;cursor:pointer;text-decoration:none;display:inline-block;transition:opacity .15s}
+.btn-primary{background:#1F3864;color:#fff}
+.btn-secondary{background:#fff;color:#1F3864;border:2px solid #1F3864}
+.btn:hover{opacity:.85}
+.btn:disabled{opacity:.4;cursor:default}
+[hidden]{display:none!important}
+#registerProgress{margin-top:12px}
+</style>
+</head>
+<body>
+<header>
+  <img id="headerLogo" alt="MCW">
+  <h1>MCW Drawing Tool</h1>
+</header>
+<main>
+  <div class="card">
+    <div id="dropzone">
+      <div class="icon">📁</div>
+      <h2>Drop PDF drawings here</h2>
+      <p>or <strong>click to select files</strong> — select all PDFs in your drawing folder</p>
+    </div>
+    <input type="file" id="fileInput" multiple accept=".pdf">
+  </div>
+
+  <div class="card" id="step1Card" hidden>
+    <div class="step-header"><div class="step-badge">1</div>Checking filenames</div>
+    <table id="checkTable">
+      <thead><tr><th>File name</th><th style="width:90px;text-align:center">Checked</th></tr></thead>
+      <tbody id="checkTbody"></tbody>
+    </table>
+    <div id="step1Summary"></div>
+  </div>
+
+  <div class="card" id="step2Card" hidden>
+    <div class="step-header"><div class="step-badge">2</div>Building drawing register</div>
+    <div id="registerProgress"></div>
+  </div>
+
+  <div class="card" id="resultsCard" hidden>
+    <div class="step-header" style="margin-bottom:20px">✅ Done — download your files</div>
+    <div class="btns">
+      <button class="btn btn-primary" id="btnXlsx">⬇ Drawing_Register.xlsx</button>
+      <button class="btn btn-secondary" id="btnErrors" hidden>⬇ Filename_Errors.txt</button>
+    </div>
+  </div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+<script>
+const LOGO_B64 = 'iVBORw0KGgoAAAANSUhEUgAAALYAAACUCAYAAAA+lNM5AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAABTJSURBVHhe7Z1rc9tGsobfngGvoiNLsR2vnY3tsyd7cur8/x+QVOVjPmxlt7Z2k1Q2F93s2JZESRRJYOZ8AEGBIEACmO6BLniqVLIBCuAMXvT09PTMkDHGwhNElD1UiLXevlal77WJKIowm80xm88QzkPM5vG/jbEIwxDz+RxRFC0/r5SC1hrdbhdKKSil0O/30O100Ol00O10EARBre8nVX+bvovLPTdeFwAqXpuOjk+q/YUDg0Efnzx6tLEQs9kM44sLzOdh9pQIWms8ffJp9nBprLWYhyEuLy8xmVxjOp1icn2NMKz//bVW6HZ7GPR7GAwGGA6G6PVi8Zdlcn2N8fgCxpjsKSd2doYY7eysPENrLabTKU7Pzlc+WwWlFPYe76LT6awcj6IIp2fnmM/nK8e3QX/7/u/ehL239xgvnj+H1jp7asn5eIyj4xNMp9PsKRG63S6++uuX2cOlmIchxuMxxuMLXE0mlSu/DEEQoN/vYWe4g93dT9DrdjcahoSPp2c4Oj5CGN60EBzs7+/h+bNnCIJgecxaiw8fT3FweLjy2SoopfD61RcY7eysHJ/N5vjPr7/i+vp65fg2ypsAT7g0Z74w1uLi8hJHR8c4efsWZ+fVLUpZwjDExcUl/nj/HoeHRzg7L2cVO50AwPYXoCrG2LVnZK11bhmstQufI8v6/crgVdjWbheutRbWsZIksdbi48ePODg8wvl47M1liqIofpmOT3BweLTiq+fR63ahSlj2WmSua61FZDZ/n21Ya2FzlG0BGFtdD16Fve1hAEBkDMwW8TfJ0fEJTt6+xXQ6dbZSdZjP5/h4eorfDw431mcQBGsC5CL3qlKPzFrYGvENr8Kez2dbLbaJItgab6gPfj88wvsPH9j91qoYY3A+HuO3g4NCcRNRvgAdIcrTMG19rmXI/b5U79pehR2G0dYvGRkDjxHI0hwdn+DDhw9bv78vrLW4uLjE8du32VOiGGPXQm8Wtpa7sM66tK29Az52GRfDGlOrIFJYa3F+PsaHjx+zpxrHGIOzs3O8L3rhiEpFUKpQ5H7l3r8ieT42NtxzE16FHb/pvBUtzWw2x/HJSWGT3zRhGOL09AzX1+vh0U4nYBFclrVr1rSqWeoIuAivwjbG3Fr/OQ9jDN69f4+ZUCiPi8n1NU7PztaEUXfUchPGmDW7SkS1OnhZsteu64bAt7Cx8KGLsNaWcld8cXF5hYsL/tE7bowxuLi4wOXVZOV4sGEgrC7GmBwfm6chtnbVf6eaHUc0Iey8AH9CGIaIGo44JESRwfn5udPQuE+up1NcXl6uvIRKSthZrM1qvRZ52sj+vyzehR1FxUIxxtwaX3ZyPcFkMsl/kLcQay0mkwmms9nymFaaPZQdu5PrYss7VpVsXVtrUTdo6V3Y8/m80O+LIsMUNnLDWuDy8mpFJHeBq8lkpRNJtOY1OJMVXwKHsPP6X3VHNL0LOwzDwkqIOwvZo/6Zz2d3ylonRFGEyfUE4aLVI1KFRqQuec/IlhxV3kbeqHNU0xX0LuxNncearQ4709kM85oV2jTT6XTZL9BKFRqRusQve1bZlkXYJlrvmG7Uywa8C3sTtkSSlA+m02nlNMnbwtXVTfqsRLgvD8uQ3Yccd8Yuct3rcKuEbYxhqSAX4tku24f+6/J4dxf/8+V/483rV+j1etnTzoRhuLSeceoqP+t1QyzPLXtV5N6rHN6FXdSrxqLzUHTOF/P5DNdTGWs9GAywv7+HXq+HR6MR9vf3Nk66qAMRYTabwRiDXq/nzWJzuCJ5I5h1Xxjvwp7Nikfxoqh5ix0Jhhw7nQ76KSvd7/UqTfcqy/V0elMGAUPBf8UYi0UohwH+Wt3CbEMI7TZY7DiWLvNy6cXk3YRuyWleVTE5w96ciE0EiTtZ2aO18C7sTSN5xvB0QlxIZpOLkRKyVkokEBSG0VJ8JNAihJFcH+TOWuw4DppfKZvO+YLNX8yBaNU1UEqxPcg00+l0GSZLT7rlom4IbhuG8fl7F/ZmeArlAlfF5kEC+dF5GGOWVdntdrOnnQnnxYNsLqwP3t2hJChs6OnWLENLhlgMcWV2BCx21p0sep5VWb+OrT2bqhFh5zVlxpjaeQEt6yRyUJr/EadnuliGGeoJURStWbe6biF/qUuQl5oaGZN73CfGWrGIiE/Szbci+UdsmOosDMOVXBF7l5KgAGAerkcdTBTlNEV+ib3fek3fbYU8CDtJuuKGHF4a+VLnkDf+b6wVq6CHTBDIP+K67sI2rI0X86yDfKlzKHoLPQQMHhwSI5vxOMqiZSPKzaPmwKXt5C91CXInE+Tk+ba4oxVvLgoAmLTfa+tHLrZBRVopQSPCzsNmOj0tPPR6/HHsrJBZn1rqYrEm0ifLc2uEHUVyyUcPGZGRx8yQOqcrkr4WAUDNazci7LwMP2ubz+y7j0j42GkDxN3SpvNQrIN7yl/qEuQt6m5zpt633E6iyCwFx93fLwosVKURYc9mOcJG85l99xXp/JSsz+1CurPooodGhJ1XEeYWTAu7r3S7q/u6uBL7wWkfe/151iUyN62By3UbEXYeLoVo2Qz33MqsAeJ8dtaY5XiGy2VvhbDjToJDKVo20unwhvzSnTprebdWiVJ9rewaI1VoTNjZYXWHMrRsQSl+HzsRHxGxxrHT4T5bMwEKTQo7nckXzzOsX4iWzUh0HpPUVeuQz7GNvPTmsjQm7HSGnzFGrHJa+ENyyPjVnG6kSS3P4aKJxoS9EuRvM/tEkcgXSZPtTLpg7U0L4/K63BphuxWjZRNBZhtnDtJidrGsmwgdVgtoTtiMb3nLZoKA32LHE3rjf3O6IulruWikMWGnh05twaBNCw8SW3ZEi3izFRA2x/UaE/ZK5+MWLJRzn+kIuCKRkVk0h0sHjQk7nRMgGTJqkQn3ST0vwxREaEzY81TqqrFtHPuuIWGtwbh8WmPCnk5vFqe0gtOLWhYIWG0JjDEs37UxYa8v/MjjW7XkE2j+mTQSGHOzXUfosM5MY8Je2Tebb/XYlhyICP0+b4ZfwrqBciOKoqUyXFySxoSdZmXWc4sI6QXnOUhExy3sNC7XbkzYyXbCrX8tDxGxJ4wkSWycKatZXCIvjQnbLnaEsoLrUbfIkeT2zOb1xbcNF4PXmLCRWg85bF0RUWJ58JrsZCDFxapuw8VFbVTY89ksttgOvd+W7ZBAvoikoJNIwp3tPCYLr9RdKvbOQ4ROJ0C322X9yW6DZ61lXwB+6T7yNgTAyuqt9YVNf/v+7/X/2pEXf/oTdj95hMPjY5ydnWdPe6Hb7eKrv34JLATwx/v3ODo+yX6MhU/39/DyxYvl/621uJpMnLLY8iAAw8FguUOZtRbjiwv855dfsx+tjVIK//e/X+Hk3Tu8ffsue9qJ/3rzGjvDIb7/xz9qvzmNWex4rlxj79StgIiwMxzik9GI9efRaLSy7R4RiWT4ubgKmwjn4SJqlj1TnsaEjSThhaj2W9lSHu4dgBNRS4h7HsX+u0vyVmPCttbC2DgOGkl2RFqAhevAibV2ORbBDcd+n7ylrQARwZgIkTGYzot36225vURSq3dZ9+0/GhO2tTYeMrXWaW5bS1kIinlSr9SydMa6p642JmykEl4cy9BSAiIZP1tklzWG0ehGhe2SlthSHf7FKd194TwswxSxRoUd59669X5bykGk2Hc3yO5swAXHC8Mq7Kr7ndAiH6Bs5RCRyMTUhwAR/xp+URSJDK0bY5xdHFZhj3Z2soc2Yiu6I0opsYT5lupEQpvOGnPLfGxVsXNijMGsQkSEPCzXdZ/hdvlMdLPOHjeuo9Kswk6C9mWxi1yJ0hBVun7LKtxRkdBIWWz367IKu+pIlDEGl5eX2cOFEAHE7Cc+JLj7Jya1Mion8eZNbtdlFTZq5A5U8qXaCEptRDre1R51aapqKA92YXPvd7ICERSxf+UHARFBc+eLCCk7ikLnl4a3pIBo1ELE6jwg7kpbFxnr/GVZhS0tvPj6vIMMDwnuDD9Xq1pEFIawDhN5wS1saYgI1LoiDhCruC+vrrKH2LieXmcPVYKvlB6w1rJuSP/QIOLN8JtUCdVWZDy+yB6qBLuwJaMWxNRjfrAIDKuXIQgCUV3kwS5s0ZFBx3lwDx0igmZehqEM/X6fPQFrG+zC5l6/Ik0Q6NYVcYCI2JdhKIPWGoHnTj+rsK217MO2CUSEIAhai+0AAY10vrVW6HarZX66wlpKkggppQh00FpsZ/xbBiKFrmAYOA9WFVqBRJsEIoLSqrXYd5GKyXEcsAobQluvJZBFa7EdIKI7s7OBK6zCdk013IwFVLXswZZVlFLoMM97LEMQ6Lttsa2NQ3ISqaVEClrrBjxEWZLpVZw/ybrjWYgIPc+dOCzWR/QtbNZFKff39/H000/xw08/sVtvrTWeP/8Ms9kM7979kT1dmyYXpTTG4Keff17ZQY0Day3+8uY1hsNh9hTOzs/xy6+/ZQ+L8pc3rzGdzfD7wWH2lBisFhupsJwEkv57UyTLeXH/FFkrck2bq0EQdNDp+G0pBITNP1Mj4T4K2zv+dQ3Aen92AsImkZAfCYYSHxKKlOhYQxFa+72nyN1ECiHo4jwk4vVFBJ7PFnwbJfYSkmCiEjXwQO4bSXTJF1orsVZ8E61SHhgSK0JtQusgvunC6PlCRNgirkgLC6R8W2zdSH+VX4FE8VvKTDvXkQeC35n+SsWuCDz72ewlJAAdgQL0+v3soZY7QLqj6tETERC20EzynlBs/MHheTUtpWip6CDw9wzZhQ2h6EUTCfL3ESLemerbUOrGx/YVrrXW8gub2oUjbzVaKXQ8Ws60EqRGpLMQEb+wIRTW8dl83mfiXB7+PlAR6dbB17A6kZArAgHXwVel3HeU8jukTnTjY0ut9ZdFKS0j7NiP47WwPkNFLXwEQeA9jq2UEhK2gBB9dTxaeEm7PUrARc1DTthE7KOP3C/KQ8ZnZCTQenkv7c04CURFsBQ2rxBbi82HVjdikyYd+vW5WI9I6WKLwCts7kXLHzI+LXba+fC1aA6RkCvidey0pTJK+02ESvC19INYHJsbibj4Q4aSoW4v3NzH1z2VlLC5K85Xs/lQoFTGnSRa60YG1mSjIow+9mAwyB5qccTHbPVOJ1gJ8fk0UCJ3IqVY8wK6DaxedJ+J83myR/nROlgbgfYhblJCrohinnjLea2WxXLCPgRGtLbcg7QLlFxfpHQ+w0kt1dFB4CVCQbTu8HAP3GVJtj0XvIufhJeW6iiBAbQ8Yv96VdoS0wbT0GKTWzFhczY5nB3RliTDj+/5FJHny0tbbCJC0AnkhA3GjoLP/OEWRlIpqwnSLpBS8Sa6PMrLQRFfrNTXUGwLL0qpFUeEPOxaRqTixKvsCS6I0Y9royL8xG4Cj+EpIpvfE6/ZLXvPpG8nJ2zFV3HZCmpxR+uAzfAUEQT+sgiziN2Vc1VPruts4yHFcbTW4sLWOm+LDtlaJsSegphiiIjN0voSNnm8V9Moxha1CJWTkyJdv6QUtFSuCJIOMUNIyccIWYIPv9MHZctQ8mO1yQ7PEJH40g9xuE8wKsLV4HBZ/YcE5Yz4Zcmzpj7o9WQjXImnIKaauMrcK66NiNSgRLXHrZPY4y9E2mJjUTaxkiW+jiucWYJlkHRHsgvi27yDDARBsNWFU6REZ40TrSdAYeHbS0KLHRs2l94Brgw/73twK7logYVd2X9x0+5eLnQ73a1GhTMcm0cQBLnfQfKeSPn163dmQmvNImzpXnSWQGuR1WKxGKBICzuKIiGLrbf2DLXwilBBEEDlGAj+0q6SlEmsZMSUuuprWayEeKKrjLDDMMI8DJf/n15PYQSErdV2NyNOhHJ/PkVorXO/AwlabSKCWiRZyZXsjqKVEku6ms1muLqaLP8/vriIrTYzvX5/q2ilhV1km7kMXhHJGtxyd2DC5yIrWCRc9Xu97GEWZrMZ3r57i98ODvDzL7/i9Owsd89zJyjul5QRj5DhBJa+bv4NpBKh4jh5fO3tpXeAo+KayOwLArk8iul0ho8fTzEej2GY95tH0nEs+d2536k1Cp6/1B44lApYyNxhgWJo1n2H+wCg3++jf0f3vBn0+6UjSZKhTaVXU1YTiDHrcxPiwnYdBMgLGUnT7XRLi+O2MRwMSu/10unItUy0IR+/jJvkiugdODL8iipHkiDQGAz6Yg9diiAI0O31Sg+CaB04P58idNGQPZHoIv7JPWVKtYBjEMDV4tdlNBrdOXdkZzhEv1++41smLFgXpQqiH1YusU0RLftkMndY4BpSil2Z7FE/9Lo9DIeDO2O1tdbY2RlWc6EE6zY/FxvxyITl7zQjiYosyl9fdSXJLVtJYmE7XMABImBvd7eaUBpkMOhjtDOqVF8EKog2u1PUMS06zkLKzREXtgtaK7GKL0Ov18Pjx7u33moHQYBHo0eVU0JdW9RNFAk4WdBGCj8+tmPnTzewMU8aIsL+3h6Gw2H21K2BiDAcDPD48W7lulaKRHzsTYNOxJQctw1RYbtahEAHlR8WN1prPP/sWSPx9DJ0ux08ffqk1git1HLCm8K8JDSLhhZD9V4sdpwCWr3CE1wHd7gY9Pv44s+fi4jABa01nj17hp2aLUogtH51bLHzrTalOnicWGtXjKissLVrOMnlb3nZGQ7x5tUrpxaIE601nj55gr3d3eyp0pBji1pEEAQb9yAKhJY5S7s4MndYEE82KC7gXWM02sHrL76IZ6g4vbBuBEGAzz57hmdPn2RPVUIVdPBccXVB65J+YUTvHlda/YqL/7z+30swGu3gzasvMBrteI+WKKXQ7/fw+csXeLK/nz1dGSIq8hic0FqLji7mQUQr+0iKCtuVXrfn8FrIMRgM8PnLl3jy5FMMBwNx60RE6PV62Hv8GH/+/HM8Go2yH6mNhN1Qirb47pvO1SdtaJTWGtZacPw+PDgAAHz99dfL30rR2ufK/v73v/+1cr1vv/0Wiupfr+h3+vuW/d0JAvzrn//Ey5cvcHkxxqNHI/YRNWstBoMBrq8nePH8M/z04w8Y9Pv45ptvgILvVfW3Uuv14fr79OMpqOB+APDdd9+h0wnW/s7lt1IKP/7w4/I+/w80dtUJRao/lwAAAABJRU5ErkJggg==';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+document.getElementById('headerLogo').src = 'data:image/png;base64,' + LOGO_B64;
+
+// ── Constants ────────────────────────────────────────────────────────────────
+
+const CATEGORIES = [
+  ['01','GA'],['02','Demolition'],['03','Fire strategy'],
+  ['04','Acoustic strategy'],['05','Setting out drawings'],
+  ['06','Access & Maintenance'],['07','Repairs'],
+  ['21','External walls'],['22','Internal partitions'],
+  ['23','Floors'],['24','Stairs, Lifts & ramps'],['27','Roofs'],
+  ['31','External Windows & doors'],['32','Internal Doors & Screens'],
+  ['33','Access floors'],['34','Balustrades'],['35','Ceilings'],
+  ['37','Rooflights'],['42','Internal wall finishes'],
+  ['43','Internal floor finishes'],['72','FF&E'],
+  ['73','Catering and kitchen'],['74','Sanitary'],
+  ['90','External works'],['99','Existing GA'],
+];
+const CATEGORY_MAP = Object.fromEntries(CATEGORIES);
+
+// Register: exact case-sensitive matching
+const REGISTER_FIELDS = [
+  {key:'drawing_title', label:'Drawing Title', multiline:true,  leftM:20,  rightM:450},
+  {key:'drawing_no',    label:'Drawing No.',   multiline:false, leftM:15,  rightM:110},
+  {key:'rev',           label:'Rev',           multiline:false, leftM:15,  rightM:50 },
+  {key:'project_title', label:'Project Title', multiline:false, leftM:20,  rightM:450},
+];
+const ALL_REG_LABELS = new Set(REGISTER_FIELDS.map(f => f.label));
+
+// Checker: case-insensitive, with aliases
+const CHECK_FIELDS = [
+  {key:'drawing_no', aliases:['drawing no.','drawing no','dwg no.','dwg no','drawing number']},
+  {key:'status',     aliases:['status']},
+  {key:'revision',   aliases:['rev','rev.']},
+];
+const ALL_CHECK_ALIASES = CHECK_FIELDS.flatMap(f => f.aliases);
+
+// ── Text utilities ────────────────────────────────────────────────────────────
+
+function norm(t) { return (t||'').replace(/\s+/g,' ').trim(); }
+
+function isRegLabel(t) { return ALL_REG_LABELS.has(norm(t)); }
+function looksLikeValue(t) {
+  const s = norm(t);
+  return s.length > 0 && s.length <= 120 && !isRegLabel(s);
+}
+
+function checkIsLabel(t, aliases) {
+  const s = norm(t).toLowerCase().replace(/[.:]+$/,'').trim();
+  return aliases.some(a => s === a.replace(/[.]+$/,''));
+}
+function isAnyCheckLabel(t) { return checkIsLabel(t, ALL_CHECK_ALIASES); }
+
+// ── PDF text extraction ───────────────────────────────────────────────────────
+
+async function extractWords(arrayBuffer) {
+  const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
+  const raw = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const tc = await page.getTextContent();
+    for (const item of tc.items) {
+      const s = item.str;
+      if (!s || !s.trim()) continue;
+      const x0 = item.transform[4];
+      const y  = item.transform[5];
+      const x1 = x0 + Math.abs(item.width || 0);
+      raw.push({text: s, x0, y, x1});
+    }
+  }
+
+  // Group by y (±3pt = same line), then merge touching chunks into words
+  const lineMap = new Map();
+  for (const item of raw) {
+    let key = null;
+    for (const k of lineMap.keys()) {
+      if (Math.abs(item.y - k) <= 3) { key = k; break; }
+    }
+    if (key === null) { key = item.y; lineMap.set(key, []); }
+    lineMap.get(key).push(item);
+  }
+
+  const words = [];
+  for (const [lineY, items] of lineMap) {
+    items.sort((a,b) => a.x0 - b.x0);
+    let cur = null;
+    for (const item of items) {
+      if (!cur) {
+        cur = {text: item.text, x0: item.x0, x1: item.x1, y: lineY};
+      } else if (item.x0 - cur.x1 < 5) {
+        cur.text += item.text;
+        cur.x1 = Math.max(cur.x1, item.x1);
+      } else {
+        if (cur.text.trim()) words.push(cur);
+        cur = {text: item.text, x0: item.x0, x1: item.x1, y: lineY};
+      }
+    }
+    if (cur && cur.text.trim()) words.push(cur);
+  }
+  return words;
+}
+
+// ── Field extraction — register (exact, case-sensitive) ──────────────────────
+
+function extractRegisterFields(words) {
+  const found = {};
+  for (const field of REGISTER_FIELDS) {
+    if (found[field.key]) continue;
+    const wc = field.label.split(' ').length;
+    for (let i = 0; i < words.length; i++) {
+      if (i + wc > words.length) continue;
+      const span = words.slice(i, i + wc);
+      const ys = span.map(w => w.y);
+      if (Math.max(...ys) - Math.min(...ys) > 5) continue;
+      const phrase = norm(span.map(w => w.text).join(' '));
+      if (phrase !== field.label) continue;
+
+      const x0     = Math.min(...span.map(w => w.x0));
+      const labelY = Math.min(...span.map(w => w.y));
+
+      // Collect items visually below (smaller y in PDF coords)
+      const below = words
+        .filter(w => w.y < labelY - 2
+                  && w.x0 >= x0 - field.leftM
+                  && w.x0 <= x0 + field.rightM)
+        .sort((a,b) => b.y - a.y);  // closest first
+
+      if (!below.length) break;
+
+      // Group into lines
+      const lines = [];
+      let curLineY = null, curLine = [];
+      for (const w of below) {
+        if (curLineY === null || Math.abs(w.y - curLineY) <= 3) {
+          curLine.push(w); curLineY = curLineY ?? w.y;
+        } else {
+          lines.push({y: curLineY, words: curLine});
+          curLine = [w]; curLineY = w.y;
+        }
+      }
+      if (curLine.length) lines.push({y: curLineY, words: curLine});
+
+      const maxLines = field.multiline ? 4 : 1;
+      const parts = [];
+      let prevY = null;
+      for (const line of lines) {
+        if (prevY !== null && prevY - line.y > 25) break;
+        line.words.sort((a,b) => a.x0 - b.x0);
+        const lt = norm(line.words.map(w => w.text).join(' '));
+        if (!lt || isRegLabel(lt)) break;
+        parts.push(lt);
+        prevY = line.y;
+        if (parts.length >= maxLines) break;
+      }
+      const val = norm(parts.join(' '));
+      if (looksLikeValue(val)) found[field.key] = val;
+      break;
+    }
+  }
+  return found;
+}
+
+// ── Field extraction — checker (case-insensitive, aliases) ───────────────────
+
+function extractCheckerFields(words) {
+  const found = {};
+  for (const field of CHECK_FIELDS) {
+    if (found[field.key]) continue;
+    for (let i = 0; i < words.length; i++) {
+      if (found[field.key]) break;
+      for (let span = 1; span <= 3; span++) {
+        if (i + span > words.length) continue;
+        const sw = words.slice(i, i + span);
+        const ys = sw.map(w => w.y);
+        if (Math.max(...ys) - Math.min(...ys) > 5) continue;
+        const phrase = norm(sw.map(w => w.text).join(' '));
+        if (!checkIsLabel(phrase, field.aliases)) continue;
+
+        const x0 = Math.min(...sw.map(w => w.x0));
+        const x1 = Math.max(...sw.map(w => w.x1));
+        const ly = Math.min(...sw.map(w => w.y));
+
+        const cands = words
+          .filter(w => w.y < ly - 2 && w.x0 < x1 + 40 && w.x1 > x0 - 40 && w.text.trim())
+          .sort((a,b) => b.y - a.y);
+
+        if (!cands.length) break;
+        const nearY = cands[0].y;
+        const sameLine = cands.filter(w => Math.abs(w.y - nearY) <= 3).sort((a,b) => a.x0 - b.x0);
+        const val = norm(sameLine.map(w => w.text).join(' '));
+        if (val && !isAnyCheckLabel(val)) found[field.key] = val;
+        break;
+      }
+    }
+  }
+  return found;
+}
+
+// ── Filename checking ─────────────────────────────────────────────────────────
+
+function checkOneFile(filename, cf) {
+  const reasons = [];
+  if (!filename.toLowerCase().endsWith('.pdf'))
+    return {ok:false, reasons:['File extension was not .pdf']};
+
+  const stem = filename.replace(/\.pdf$/i,'');
+  if (!cf.drawing_no) { reasons.push("Could not find Drawing No. in the title block"); return {ok:false,reasons}; }
+  if (!cf.status)     { reasons.push("Could not find Status in the title block");     return {ok:false,reasons}; }
+  if (!cf.revision)   { reasons.push("Could not find Rev in the title block");        return {ok:false,reasons}; }
+
+  let rem = stem;
+  const check = (expected, label, last) => {
+    if (!rem.startsWith(expected)) {
+      reasons.push(`${label} was incorrect (should be '${expected}')`);
+      return false;
+    }
+    rem = rem.slice(expected.length);
+    if (!last) {
+      if (!rem.startsWith('-')) { reasons.push(`${label} must be followed by '-'`); return false; }
+      rem = rem.slice(1);
+    } else if (rem && /^[a-zA-Z0-9]/.test(rem)) {
+      reasons.push(`Revision '${expected}' is followed by extra alphanumeric characters`);
+      return false;
+    }
+    return true;
+  };
+
+  if (!check(cf.drawing_no, "Drawing No.", false)) return {ok:false,reasons};
+  if (!check(cf.status,     "Status",      false)) return {ok:false,reasons};
+  if (!check(cf.revision,   "Revision",    true))  return {ok:false,reasons};
+  return {ok:true,reasons:[]};
+}
+
+// ── Category + grouping ───────────────────────────────────────────────────────
+
+function getCatNum(drawingNo) {
+  if (!drawingNo) return null;
+  const segs = drawingNo.split('-').filter(Boolean);
+  if (!segs.length) return null;
+  const last = segs[segs.length-1];
+  if (last.length >= 2 && /^\d/.test(last)) return last.slice(0,2);
+  return null;
+}
+
+function groupByCategory(entries) {
+  const byCat = {}, uncat = [];
+  for (const {fields} of entries) {
+    const dno = fields.drawing_no || '';
+    const title = fields.drawing_title || 'NOT FOUND';
+    const rev   = fields.rev || 'NOT FOUND';
+    const cat   = getCatNum(dno);
+    const row   = [title, dno || 'NOT FOUND', rev];
+    if (cat && CATEGORY_MAP[cat]) {
+      (byCat[cat] = byCat[cat]||[]).push([dno, row]);
+    } else {
+      uncat.push([dno, row]);
+    }
+  }
+  const result = [];
+  for (const [num, name] of CATEGORIES) {
+    if (byCat[num]) {
+      byCat[num].sort((a,b) => a[0] < b[0] ? -1 : 1);
+      result.push([`(${num}) ${name}`, byCat[num].map(x=>x[1])]);
+    }
+  }
+  if (uncat.length) {
+    uncat.sort((a,b) => a[0] < b[0] ? -1 : 1);
+    result.push(['Uncategorised', uncat.map(x=>x[1])]);
+  }
+  return result;
+}
+
+function mostCommon(arr) {
+  if (!arr.length) return null;
+  const c = {};
+  for (const x of arr) c[x]=(c[x]||0)+1;
+  return Object.entries(c).sort((a,b)=>b[1]-a[1])[0][0];
+}
+function getJobNo(filenames) {
+  const p = filenames.map(f=>f.slice(0,4)).filter(x=>x.length===4);
+  return p.length ? mostCommon(p) : 'NOT FOUND';
+}
+function shortProject(name) {
+  if (!name||name==='NOT FOUND') return name||'';
+  const w = name.split(/\s+/);
+  return w.length <= 2 ? name : w.slice(-2).join(' ');
+}
+
+// ── Excel building ────────────────────────────────────────────────────────────
+
+async function buildExcel(grouped, projectName, jobNo) {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Drawing Register');
+
+  // Logo
+  const imgId = wb.addImage({base64: LOGO_B64, extension:'png'});
+  ws.addImage(imgId, {tl:{col:0,row:1}, ext:{width:130,height:106}, editAs:'oneCell'});
+  ws.getRow(2).height = 110;
+
+  // Address
+  const addrCell = ws.getCell('B2');
+  addrCell.value = 'MCW Architects\nStudio 2\nStapleford Granary\nBury Road, Stapleford\nCambridge CB22 5BP\n\n+44 1223 792 500\nmcwarchitects.com';
+  addrCell.font = {name:'Arial',size:10};
+  addrCell.alignment = {horizontal:'left',vertical:'top',wrapText:true};
+  ws.mergeCells('B2:D2');
+
+  // Title
+  const tc = ws.getCell('A6');
+  tc.value = 'WS3 Drawing Issue and Record Sheet';
+  tc.font = {name:'Arial',size:14,bold:true};
+
+  // Box border helper
+  const bb = {top:{style:'thin'},left:{style:'thin'},bottom:{style:'thin'},right:{style:'thin'}};
+  const applyBorder = (r,cols,border) => { for(const c of cols) ws.getCell(r,c).border = border; };
+
+  // Project / Job No
+  ws.getCell('A8').value = 'Project:';  ws.getCell('A8').font = {name:'Arial',size:10,bold:true};
+  ws.getCell('C8').value = projectName; ws.getCell('C8').font = {name:'Arial',size:10};
+  ws.mergeCells('C8:D8');
+  ws.getCell('A9').value = 'Job No.:'; ws.getCell('A9').font = {name:'Arial',size:10,bold:true};
+  ws.getCell('C9').value = jobNo;       ws.getCell('C9').font = {name:'Arial',size:10};
+  ws.mergeCells('C9:D9');
+  applyBorder(8,[1,2,3,4,5],bb);
+  applyBorder(9,[1,2,3,4,5],bb);
+
+  // Date
+  const today = new Date();
+  const dd = String(today.getDate()).padStart(2,'0');
+  const mm = String(today.getMonth()+1).padStart(2,'0');
+  const yy = String(today.getFullYear()).slice(-2);
+  for (const [i,[lbl,val]] of [['day',dd],['month',mm],['year',yy]].entries()) {
+    const r = 11+i;
+    ws.getCell(r,4).value=lbl; ws.getCell(r,4).alignment={horizontal:'right'}; ws.getCell(r,4).font={name:'Arial',size:10};
+    ws.getCell(r,5).value=val; ws.getCell(r,5).alignment={horizontal:'center'}; ws.getCell(r,5).font={name:'Arial',size:10};
+  }
+
+  // Distribution
+  ws.getCell('A13').value = 'DISTRIBUTION';
+  ws.getCell('A13').font = {name:'Arial',size:10,bold:true};
+  for (let r=14;r<=18;r++) {
+    ws.mergeCells(`A${r}:C${r}`);
+    applyBorder(r,[1,2,3],bb);
+  }
+
+  // Column widths
+  ws.getColumn(1).width = 55;
+  ws.getColumn(2).width = 26;
+  ws.getColumn(5).width = 12;
+
+  // Table headers (row 20)
+  const T = 20;
+  ws.getCell(T,1).value='DRAWING TITLE'; ws.getCell(T,1).font={name:'Arial',bold:true};
+  ws.getCell(T,2).value='Dwg No.';       ws.getCell(T,2).font={name:'Arial',bold:true};
+  ws.getCell(T,5).value='Revisions';     ws.getCell(T,5).font={name:'Arial',bold:true};
+  ws.mergeCells(T,2,T,4);
+
+  // Navy project bar (row 21)
+  const pbr = T+1;
+  ws.getCell(pbr,1).value = shortProject(projectName);
+  ws.mergeCells(pbr,1,pbr,5);
+  const pbc = ws.getCell(pbr,1);
+  pbc.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF1F3864'}};
+  pbc.font={name:'Arial',bold:true,color:{argb:'FFFFFFFF'}};
+  pbc.alignment={horizontal:'left',vertical:'middle'};
+
+  // Categories & rows
+  const specialRows = new Set([pbr]);
+  const tgb = {
+    top:{style:'thin',color:{argb:'FFBFBFBF'}},left:{style:'thin',color:{argb:'FFBFBFBF'}},
+    bottom:{style:'thin',color:{argb:'FFBFBFBF'}},right:{style:'thin',color:{argb:'FFBFBFBF'}}
+  };
+  let ri = pbr+1;
+  for (const [catLabel, rows] of grouped) {
+    ws.getCell(ri,1).value = catLabel;
+    ws.mergeCells(ri,1,ri,5);
+    const cc = ws.getCell(ri,1);
+    cc.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF808080'}};
+    cc.font={name:'Arial',color:{argb:'FFFFFFFF'}};
+    cc.alignment={horizontal:'left',vertical:'middle'};
+    specialRows.add(ri++);
+
+    for (const [title,dwgNo,rev] of rows) {
+      ws.getCell(ri,1).value=title;  ws.getCell(ri,1).font={name:'Arial'};
+      ws.getCell(ri,2).value=dwgNo;  ws.getCell(ri,2).font={name:'Arial'};
+      ws.getCell(ri,5).value=rev;    ws.getCell(ri,5).font={name:'Arial'};
+      ws.getCell(ri,5).alignment={horizontal:'center'};
+      ws.mergeCells(ri,2,ri,4);
+      for(let c=1;c<=5;c++) ws.getCell(ri,c).border=tgb;
+      ri++;
+    }
+  }
+
+  // Blue accent on column 5 (skip merged special rows)
+  const blue = {type:'pattern',pattern:'solid',fgColor:{argb:'FFDCEEFB'}};
+  for (let r=1;r<ri;r++) { if(!specialRows.has(r)) ws.getCell(r,5).fill=blue; }
+
+  ws.views=[{state:'frozen',xSplit:0,ySplit:T}];
+  ws.pageSetup={orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0};
+  return wb;
+}
+
+// ── Error text builder ────────────────────────────────────────────────────────
+
+function buildErrorText(errorEntries) {
+  const now = new Date().toISOString().replace('T',' ').slice(0,19);
+  const lines = [
+    'Drawing Filename Errors',
+    `Generated: ${now}`,
+    `${errorEntries.length} file(s) with naming problems.`,
+    '',
+  ];
+  for (const {name,reasons} of errorEntries) {
+    lines.push(name);
+    for (const r of reasons) lines.push(`   - ${r}`);
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+
+// ── Download helper ───────────────────────────────────────────────────────────
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 500);
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+
+function addCheckRow(name, ok) {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td style="word-break:break-all">${name}</td>
+    <td style="text-align:center"><span class="${ok?'tick':'cross'}">${ok?'✓':'✗'}</span></td>`;
+  document.getElementById('checkTbody').appendChild(tr);
+}
+
+function setProgress(msg, done=false) {
+  const d = document.getElementById('registerProgress');
+  d.innerHTML = `<div class="progress-line ${done?'done':'active'}">${msg}</div>`;
+}
+
+let _xlsxBlob=null, _errorText=null;
+
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+// ── Main processing ───────────────────────────────────────────────────────────
+
+async function processFiles(files) {
+  if (!files.length) return;
+
+  // Reset UI
+  document.getElementById('step1Card').hidden = false;
+  document.getElementById('step2Card').hidden = true;
+  document.getElementById('resultsCard').hidden = true;
+  document.getElementById('checkTbody').innerHTML = '';
+  document.getElementById('step1Summary').innerHTML = '';
+  document.getElementById('registerProgress').innerHTML = '';
+  _xlsxBlob = null; _errorText = null;
+
+  const errorEntries = [];
+  const allEntries = [];
+
+  // ── Step 1 ──
+  for (const file of files) {
+    try {
+      const buf = await file.arrayBuffer();
+      const words = await extractWords(buf);
+      const cf = extractCheckerFields(words);
+      const rf = extractRegisterFields(words);
+      const {ok, reasons} = checkOneFile(file.name, cf);
+      if (!ok) errorEntries.push({name:file.name, reasons});
+      allEntries.push({file, fields:rf});
+      addCheckRow(file.name, ok);
+    } catch(e) {
+      errorEntries.push({name:file.name, reasons:[`Could not read PDF: ${e.message}`]});
+      allEntries.push({file, fields:{}});
+      addCheckRow(file.name, false);
+    }
+    await sleep(0); // let browser repaint
+  }
+
+  // Step 1 summary
+  const s1 = document.getElementById('step1Summary');
+  if (!errorEntries.length) {
+    s1.innerHTML = '<div class="summary ok">✓ All filenames are correct</div>';
+  } else {
+    s1.innerHTML = `<div class="summary err">✗ ${errorEntries.length} filename problem(s) found — details in the error document below</div>`;
+    _errorText = buildErrorText(errorEntries);
+  }
+
+  // ── Step 2 ──
+  document.getElementById('step2Card').hidden = false;
+  setProgress('Grouping drawings by category…');
+  await sleep(10);
+
+  const projectTitles = allEntries.map(e=>e.fields.project_title).filter(Boolean);
+  const projectName = mostCommon(projectTitles) || 'NOT FOUND';
+  const jobNo = getJobNo(allEntries.map(e=>e.file.name));
+  const grouped = groupByCategory(allEntries);
+
+  setProgress('Building Excel spreadsheet…');
+  await sleep(10);
+
+  const wb = await buildExcel(grouped, projectName, jobNo);
+  const buf = await wb.xlsx.writeBuffer();
+  _xlsxBlob = new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+
+  setProgress(`Done — ${allEntries.length} drawing(s) across ${grouped.length} category group(s)`, true);
+
+  // ── Results ──
+  document.getElementById('resultsCard').hidden = false;
+  document.getElementById('btnErrors').hidden = !_errorText;
+}
+
+// ── Event wiring ──────────────────────────────────────────────────────────────
+
+const dropzone  = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag-over'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault(); dropzone.classList.remove('drag-over');
+  const pdfs = [...e.dataTransfer.files].filter(f=>f.name.toLowerCase().endsWith('.pdf'));
+  if (pdfs.length) processFiles(pdfs);
+});
+fileInput.addEventListener('change', e => {
+  const pdfs = [...e.target.files].filter(f=>f.name.toLowerCase().endsWith('.pdf'));
+  if (pdfs.length) processFiles(pdfs);
+  fileInput.value='';
+});
+
+document.getElementById('btnXlsx').addEventListener('click', () => {
+  if (_xlsxBlob) downloadBlob(_xlsxBlob, 'Drawing_Register.xlsx');
+});
+document.getElementById('btnErrors').addEventListener('click', () => {
+  if (_errorText) downloadBlob(new Blob([_errorText],{type:'text/plain'}), 'Filename_Errors.txt');
+});
+</script>
+</body>
+</html>
