@@ -79,7 +79,7 @@ tr:last-child td{border-bottom:none}
     <div id="recipientList" class="recipient-list"></div>
     <div style="display:flex;gap:12px;margin-top:10px;margin-bottom:8px">
       <label style="font-size:13px;color:#1F3864;display:flex;align-items:center;gap:4px"><input type="checkbox" id="sharedCDE"> CDE</label>
-      <label style="font-size:13px;color:#1F3864;display:flex;align-items:center;gap:4px"><input type="checkbox" id="sharedEL"> EL</label>
+      <label style="font-size:13px;color:#1F3864;display:flex;align-items:center;gap:4px"><input type="checkbox" id="sharedEL"> Email</label>
     </div>
     <button type="button" class="add-recipient-btn" id="addRecipientBtn">+ Add recipient</button>
     <button type="button" class="add-recipient-btn" id="createExcelBtn" disabled style="margin-top:12px">Create Excel Spreadsheet</button>
@@ -497,7 +497,7 @@ function shortProject(name) {
 function getDistributionRecipients() {
   const rows = Array.from(document.querySelectorAll('#recipientList .recipient-row'));
   const cde = document.getElementById('sharedCDE').checked;
-  const el = document.getElementById('sharedEL').checked;
+  const email = document.getElementById('sharedEL').checked;
   return rows.map(row => {
     const name = row.querySelector('input[type="text"]').value.trim();
     return {name, cde, el};
