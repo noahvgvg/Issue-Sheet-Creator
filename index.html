@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MCW Drawing Tool 2</title>
+<title>MCW Drawing Tool 3</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,sans-serif;background:#f5f5f5;color:#222;min-height:100vh}
@@ -109,10 +109,13 @@ const CATEGORY_MAP = Object.fromEntries(CATEGORIES);
 
 // Register: exact case-sensitive matching
 const REGISTER_FIELDS = [
-  {key:'drawing_title', label:'Drawing Title', multiline:true,  leftM:20,  rightM:450},
-  {key:'drawing_no',    label:'Drawing No.',   multiline:false, leftM:15,  rightM:110},
-  {key:'rev',           label:'Rev',           multiline:false, leftM:15,  rightM:50 },
-  {key:'project_title', label:'Project Title', multiline:false, leftM:20,  rightM:450},
+  // rightSearch:false = only look below the label, not to the right (avoids adjacent title-block cells)
+  // maxLines = max value lines to collect
+  // gap     = max y-gap (pt) between consecutive value lines before stopping
+  {key:'drawing_title', label:'Drawing Title', multiline:true,  leftM:20, rightM:200, maxLines:2, gap:15, rightSearch:false},
+  {key:'drawing_no',    label:'Drawing No.',   multiline:false, leftM:15, rightM:400, maxLines:1, gap:30, rightSearch:true},
+  {key:'rev',           label:'Rev',           multiline:false, leftM:15, rightM:50,  maxLines:1, gap:30, rightSearch:true},
+  {key:'project_title', label:'Project Title', multiline:false, leftM:20, rightM:350, maxLines:1, gap:30, rightSearch:true},
 ];
 const ALL_REG_LABELS = new Set(REGISTER_FIELDS.map(f => f.label));
 
@@ -193,6 +196,11 @@ async function extractWords(arrayBuffer) {
 
 // ── Field extraction — register (exact, case-sensitive) ──────────────────────
 
+function normalizeDwgNo(val) {
+  // "0536 - MCW - ZZ - 00 - DR - A - 0200" → "0536-MCW-ZZ-00-DR-A-0200"
+  return val.replace(/\s*-\s*/g, '-').replace(/\s+/g, ' ').trim();
+}
+
 function extractRegisterFields(words) {
   const found = {};
 
@@ -212,11 +220,9 @@ function extractRegisterFields(words) {
 
     outer:
     for (let i = 0; i < words.length; i++) {
-      // Try spans 1-4 to handle labels split across multiple text items
       for (let span = 1; span <= 4; span++) {
         if (i + span > words.length) break;
         const sw = words.slice(i, i + span);
-        // All span words must be on the same line (same normalised y)
         const ys = sw.map(w => w.y);
         if (Math.max(...ys) - Math.min(...ys) > 5) break;
         const phrase = norm(sw.map(w => w.text).join(' '));
@@ -224,7 +230,7 @@ function extractRegisterFields(words) {
 
         const labelX0 = Math.min(...sw.map(w => w.x0));
         const labelX1 = Math.max(...sw.map(w => w.x1));
-        const labelY  = sw[0].y; // normalised — all same
+        const labelY  = sw[0].y;
 
         // ── Strategy A: search BELOW the label ──
         const below = words.filter(w =>
@@ -235,11 +241,12 @@ function extractRegisterFields(words) {
 
         if (below.length) {
           const belowLines = groupIntoLines(below);
-          const maxLines = field.multiline ? 4 : 1;
+          const maxLines = field.maxLines || (field.multiline ? 4 : 1);
+          const gap = field.gap || 30;
           const parts = [];
           let prevY = null;
           for (const ln of belowLines) {
-            if (prevY !== null && prevY - ln.y > 30) break;
+            if (prevY !== null && prevY - ln.y > gap) break;
             ln.words.sort((a,b) => a.x0 - b.x0);
             const lt = norm(ln.words.map(w => w.text).join(' '));
             if (!lt || isRegLabel(lt)) break;
@@ -247,23 +254,28 @@ function extractRegisterFields(words) {
             prevY = ln.y;
             if (parts.length >= maxLines) break;
           }
-          const val = norm(parts.join(' '));
+          let val = norm(parts.join(' '));
+          // Normalise drawing number: remove spaces around hyphens
+          if (field.key === 'drawing_no') val = normalizeDwgNo(val);
           if (looksLikeValue(val)) { found[field.key] = val; break outer; }
         }
 
         // ── Strategy B: search to the RIGHT on the same line ──
-        const right = words.filter(w =>
-          Math.abs(w.y - labelY) <= 5 &&
-          w.x0 > labelX1 + 2
-        ).sort((a,b) => a.x0 - b.x0);
+        // Only for fields that make sense (not drawing_title — would grab adjacent cells)
+        if (field.rightSearch !== false) {
+          const right = words.filter(w =>
+            Math.abs(w.y - labelY) <= 5 &&
+            w.x0 > labelX1 + 2
+          ).sort((a,b) => a.x0 - b.x0);
 
-        if (right.length) {
-          const val = norm(right.map(w => w.text).join(' '));
-          if (looksLikeValue(val)) { found[field.key] = val; break outer; }
+          if (right.length) {
+            let val = norm(right.map(w => w.text).join(' '));
+            if (field.key === 'drawing_no') val = normalizeDwgNo(val);
+            if (looksLikeValue(val)) { found[field.key] = val; break outer; }
+          }
         }
 
-        // Label found but no value — don't try other spans, move to next word
-        break outer;
+        break outer; // label found but no value — stop scanning
       }
     }
   }
@@ -290,14 +302,19 @@ function extractCheckerFields(words) {
         const x1 = Math.max(...sw.map(w => w.x1));
         const ly = Math.min(...sw.map(w => w.y));
 
+        // Drawing No. can span many cells horizontally — use very wide range;
+        // Status/Rev are narrow columns so keep tight range to avoid neighbours.
+        const xRange = field.key === 'drawing_no' ? 600 : 40;
         const cands = words
-          .filter(w => w.y < ly - 2 && w.x0 < x1 + 40 && w.x1 > x0 - 40 && w.text.trim())
+          .filter(w => w.y < ly - 2 && w.x0 < x1 + xRange && w.x1 > x0 - xRange && w.text.trim())
           .sort((a,b) => b.y - a.y);
 
         if (!cands.length) break;
         const nearY = cands[0].y;
-        const sameLine = cands.filter(w => Math.abs(w.y - nearY) <= 3).sort((a,b) => a.x0 - b.x0);
-        const val = norm(sameLine.map(w => w.text).join(' '));
+        const sameLine = cands.filter(w => Math.abs(w.y - nearY) <= 5).sort((a,b) => a.x0 - b.x0);
+        let val = norm(sameLine.map(w => w.text).join(' '));
+        // Normalise Drawing No.: "0536 - MCW - ZZ - 00" → "0536-MCW-ZZ-00"
+        if (field.key === 'drawing_no') val = val.replace(/\s*-\s*/g, '-');
         if (val && !isAnyCheckLabel(val)) found[field.key] = val;
         break;
       }
