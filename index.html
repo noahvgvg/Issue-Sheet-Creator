@@ -79,7 +79,7 @@ tr:last-child td{border-bottom:none}
     <div id="recipientList" class="recipient-list"></div>
     <div style="display:flex;gap:12px;margin-top:10px;margin-bottom:8px">
       <label style="font-size:13px;color:#1F3864;display:flex;align-items:center;gap:4px"><input type="checkbox" id="sharedCDE"> CDE</label>
-      <label style="font-size:13px;color:#1F3864;display:flex;align-items:center;gap:4px"><input type="checkbox" id="sharedEL"> Email</label>
+      <label style="font-size:13px;color:#1F3864;display:flex;align-items:center;gap:4px"><input type="checkbox" id="sharedEmail"> Email</label>
     </div>
     <button type="button" class="add-recipient-btn" id="addRecipientBtn">+ Add recipient</button>
     <button type="button" class="add-recipient-btn" id="createExcelBtn" disabled style="margin-top:12px">Create Excel Spreadsheet</button>
@@ -450,18 +450,27 @@ function getCatNum(drawingNo) {
 
 function groupByCategory(entries) {
   const byCat = {}, uncat = [];
-  for (const {fields} of entries) {
-    const dno = fields.drawing_no || '';
+  
+  for (const entry of entries) {
+    // Safely grab both the strict register fields and the forgiving checker fields
+    const fields = entry.fields || {};
+    const cf = entry.cf || {};
+    
+    // Fallback logic: If the strict register missed it, use the checker's result
+    const dno = fields.drawing_no || cf.drawing_no || '';
     const title = fields.drawing_title || 'NOT FOUND';
-    const rev   = fields.rev || 'NOT FOUND';
+    const rev   = fields.rev || cf.revision || 'NOT FOUND'; // <--- THE FIX IS HERE
+    
     const cat   = getCatNum(dno);
     const row   = [title, dno || 'NOT FOUND', rev];
+    
     if (cat && CATEGORY_MAP[cat]) {
       (byCat[cat] = byCat[cat]||[]).push([dno, row]);
     } else {
       uncat.push([dno, row]);
     }
   }
+  
   const result = [];
   for (const [num, name] of CATEGORIES) {
     if (byCat[num]) {
@@ -469,10 +478,12 @@ function groupByCategory(entries) {
       result.push([`(${num}) ${name}`, byCat[num].map(x=>x[1])]);
     }
   }
+  
   if (uncat.length) {
     uncat.sort((a,b) => a[0] < b[0] ? -1 : 1);
     result.push(['Uncategorised', uncat.map(x=>x[1])]);
   }
+  
   return result;
 }
 
@@ -497,7 +508,7 @@ function shortProject(name) {
 function getDistributionRecipients() {
   const rows = Array.from(document.querySelectorAll('#recipientList .recipient-row'));
   const cde = document.getElementById('sharedCDE').checked;
-  const email = document.getElementById('sharedEL').checked;
+  const email = document.getElementById('sharedEmail').checked;
   return rows.map(row => {
     const name = row.querySelector('input[type="text"]').value.trim();
     return {name, cde, email};
@@ -632,7 +643,7 @@ async function buildPdf(grouped, projectName, jobNo, recipients=[]) {
   visibleRecipients.forEach(r => {
     const types = [];
     if (r.cde) types.push('CDE');
-    if (r.el) types.push('EL');
+    if (r.email) types.push('Email');
     doc.text(`${r.name} - [ ${types.join(' + ')} ]`, 14, distY);
     distY += 5;
   });
@@ -727,7 +738,7 @@ async function buildExcel(grouped, projectName, jobNo, recipients=[]) {
     const typeCell = ws.getCell(r,2);
     const types = [];
     if (item.cde) types.push('CDE');
-    if (item.el) types.push('EL');
+    if (item.email) types.push('Email');
     typeCell.value = types.join(' + ');
     typeCell.font = {name:'TT Hoves Pro Light',size:10};
     typeCell.alignment = {vertical:'top',wrapText:true};
@@ -882,19 +893,26 @@ async function processFiles(files) {
     try {
       const buf = await file.arrayBuffer();
       const words = await extractWords(buf);
-      const cf = extractCheckerFields(words);  // still used for Status
+      const cf = extractCheckerFields(words);  
       const rf = extractRegisterFields(words);
-      // Use register extraction for Drawing No. and Rev — same logic, same normalisation
-      // as the spreadsheet builder, so the checker is consistent with what ends up in Excel.
-      // Status is checker-only (not in the register) so keep cf.status.
+
+      // 1. PERMANENTLY MERGE THE FALLBACKS INTO 'rf'
+      rf.rev = rf.rev || cf.revision;
+      rf.drawing_no = rf.drawing_no || cf.drawing_no;
+
+      // 2. USE THE NOW-UPDATED 'rf' FOR THE CHECKER
       const checkFields = {
-        drawing_no: rf.drawing_no || cf.drawing_no,
+        drawing_no: rf.drawing_no, 
         status:     cf.status,
-        revision:   rf.rev       || cf.revision,
+        revision:   rf.rev,        
       };
+      
       const {ok, reasons} = checkOneFile(file.name, checkFields);
       if (!ok) errorEntries.push({name:file.name, reasons});
-      allEntries.push({file, fields:rf});
+      
+      // 3. SAVE TO allEntries
+      // Now 'rf' actually contains the fallback revision, so the Excel sheet will see it!
+      allEntries.push({file, fields:rf}); 
       addCheckRow(file.name, ok);
     } catch(e) {
       errorEntries.push({name:file.name, reasons:[`Could not read PDF: ${e.message}`]});
@@ -992,6 +1010,9 @@ const distributionZone = document.getElementById('distributionZone');
 const recipientList = document.getElementById('recipientList');
 const addRecipientBtn = document.getElementById('addRecipientBtn');
 
+// 1. Create a master array to hold files across multiple uploads
+let allPdfs = []; 
+
 dropzone.addEventListener('click', () => {
   if (typeof fileInput.showPicker === 'function') {
     fileInput.showPicker().catch(() => fileInput.click());
@@ -999,17 +1020,44 @@ dropzone.addEventListener('click', () => {
     fileInput.click();
   }
 });
-dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag-over'); });
-dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
-dropzone.addEventListener('drop', e => {
-  e.preventDefault(); dropzone.classList.remove('drag-over');
-  const pdfs = [...e.dataTransfer.files].filter(f=>f.name.toLowerCase().endsWith('.pdf'));
-  if (pdfs.length) processFiles(pdfs);
+
+dropzone.addEventListener('dragover', e => { 
+  e.preventDefault(); 
+  dropzone.classList.add('drag-over'); 
 });
+
+dropzone.addEventListener('dragleave', () => {
+  dropzone.classList.remove('drag-over');
+});
+
+dropzone.addEventListener('drop', e => {
+  e.preventDefault(); 
+  dropzone.classList.remove('drag-over');
+  
+  // Grab the new files from this drop
+  const newPdfs = [...e.dataTransfer.files].filter(f => f.name.toLowerCase().endsWith('.pdf'));
+  
+  if (newPdfs.length) {
+    // 2. Add them to the master array
+    allPdfs.push(...newPdfs);
+    // 3. Process the entire accumulated list
+    processFiles(allPdfs);
+  }
+});
+
 fileInput.addEventListener('change', e => {
-  const pdfs = [...e.target.files].filter(f=>f.name.toLowerCase().endsWith('.pdf'));
-  if (pdfs.length) processFiles(pdfs);
-  fileInput.value='';
+  // Grab the new files from the file picker
+  const newPdfs = [...e.target.files].filter(f => f.name.toLowerCase().endsWith('.pdf'));
+  
+  if (newPdfs.length) {
+    // Add them to the master array
+    allPdfs.push(...newPdfs);
+    // Process the entire accumulated list
+    processFiles(allPdfs);
+  }
+  
+  // Clear the input so the user can select the same file twice if they really want to
+  fileInput.value = ''; 
 });
 
 distributionZone.addEventListener('dragover', e => {
